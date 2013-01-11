@@ -49,6 +49,139 @@ static unsigned timer_cb_called;
 static unsigned getaddrinfo_cb_called;
 
 
+#if defined(_WIN32)
+
+static void saturate_io_threadpool(void) { }
+static void unblock_io_threadpool(void) { }
+
+#else /* !defined(_WIN32) */
+
+/* uv-unix effectively has two threadpools: one for CPU-bound tasks and one
+ * for I/O tasks. We need some special handling to saturate the second one.
+ */
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+
+struct io_task {
+  ngx_queue_t queue;
+  uv_fs_t fs_req;
+  int pipefd[2];
+  char buf[1];  /* Variadic length. */
+};
+
+static ngx_queue_t io_tasks;
+
+
+static size_t probe_pipebuf_size(void) {
+  char buf[4096];
+  int pipefd[2];
+  ssize_t r;
+  size_t n;
+
+  memset(buf, 0, sizeof(buf));
+  ASSERT(0 == pipe(pipefd));
+  ASSERT(0 == fcntl(pipefd[1],
+                    F_SETFL,
+                    O_NONBLOCK | fcntl(pipefd[1], F_GETFL)));
+
+  for (n = 0; (r = write(pipefd[1], buf, sizeof(buf))) > 0; n += r);
+  ASSERT(r == -1 && (errno == EAGAIN || errno == EWOULDBLOCK));
+
+  close(pipefd[0]);
+  close(pipefd[1]);
+
+  return n;
+}
+
+
+static void io_task_cleanup(struct io_task* task) {
+  uv_fs_req_cleanup(&task->fs_req);
+  ngx_queue_remove(&task->queue);
+  ngx_queue_init(&task->queue);
+  free(task);
+}
+
+
+static void io_write_cb(uv_fs_t* req) {
+  struct io_task* task;
+
+  task = container_of(req, struct io_task, fs_req);
+  io_task_cleanup(task);
+}
+
+
+static void saturate_io_threadpool(void) {
+  struct timeval timeout;
+  struct io_task* task;
+  size_t pipebuf_size;
+  uv_loop_t* loop;
+  fd_set rdset;
+  int r;
+
+  ngx_queue_init(&io_tasks);
+  loop = uv_default_loop();
+  pipebuf_size = probe_pipebuf_size();
+
+  /* Submit write requests that are pipebuf_size + 1 bytes large, i.e. too
+   * large to complete without reading from the pipe first (which we don't),
+   * thereby forcing the request to block.
+   */
+  for (;;) {
+    task = calloc(1, sizeof(*task) + pipebuf_size);
+    ASSERT(task != NULL);
+    ngx_queue_init(&task->queue);
+
+    ASSERT(0 == pipe(task->pipefd));
+    ASSERT(0 == uv_fs_write(loop,
+                            &task->fs_req,
+                            task->pipefd[1],
+                            task->buf,
+                            sizeof(task->buf) + pipebuf_size,
+                            -1,
+                            io_write_cb));
+
+    do {
+      FD_ZERO(&rdset);
+      FD_SET(task->pipefd[0], &rdset);
+      timeout.tv_sec = 0;
+      timeout.tv_usec = 350000;  /* 350 ms */
+      r = select(task->pipefd[0] + 1, &rdset, NULL, NULL, &timeout);
+    }
+    while (r == -1 && errno == EINTR);
+
+    ASSERT(r != -1);
+
+    if (r == 0) {
+      ASSERT(0 == uv_cancel((uv_req_t*) &task->fs_req));
+      close(task->pipefd[0]);
+      close(task->pipefd[1]);
+      return;
+    }
+
+    ASSERT(FD_ISSET(task->pipefd[0], &rdset));
+    ngx_queue_insert_tail(&io_tasks, &task->queue);
+  }
+}
+
+
+static void unblock_io_threadpool(void) {
+  struct io_task* task;
+  ngx_queue_t* q;
+
+  ngx_queue_foreach(q, &io_tasks) {
+    task = ngx_queue_data(q, struct io_task, queue);
+    close(task->pipefd[0]);
+    close(task->pipefd[1]);
+  }
+}
+
+#endif /* defined(_WIN32) */
+
+
 static void work_cb(uv_work_t* req) {
   uv_mutex_lock(&signal_mutex);
   uv_cond_signal(&signal_cond);
@@ -91,12 +224,15 @@ static void saturate_threadpool(void) {
       break;
     }
   }
+
+  saturate_io_threadpool();
 }
 
 
 static void unblock_threadpool(void) {
   uv_mutex_unlock(&signal_mutex);
   uv_mutex_unlock(&wait_mutex);
+  unblock_io_threadpool();
 }
 
 

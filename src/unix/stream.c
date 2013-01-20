@@ -526,7 +526,7 @@ void uv__server_io(uv_loop_t* loop, uv__io_t* w, unsigned int events) {
         if (use_emfile_trick) {
           SAVE_ERRNO(r = uv__emfile_trick(loop, uv__stream_fd(stream)));
           if (r == 0)
-            continue;
+            return;
         }
 
         /* Fall through. */

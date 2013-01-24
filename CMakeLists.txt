@@ -1,0 +1,132 @@
+# Copyright (c) 2013 Plenluno All rights reserved.
+
+cmake_minimum_required(VERSION 2.8)
+
+project(uv)
+
+# variables --------------------------------------------------------------------
+
+## uv-include
+set(uv-include
+    include
+    include/uv-private
+    src
+)
+
+## uv-src
+set(uv-src
+    src/fs-poll.c
+    src/inet.c
+    src/uv-common.c
+)
+
+if(UNIX)
+    set(uv-src
+        ${uv-src}
+        src/unix/async.c
+        src/unix/core.c
+        src/unix/dl.c
+        src/unix/eio/eio.c
+        src/unix/error.c
+        src/unix/ev/ev.c
+        src/unix/fs.c
+        src/unix/loop.c
+        src/unix/loop-watcher.c
+        src/unix/pipe.c
+        src/unix/poll.c
+        src/unix/process.c
+        src/unix/signal.c
+        src/unix/stream.c
+        src/unix/tcp.c
+        src/unix/thread.c
+        src/unix/timer.c
+        src/unix/tty.c
+        src/unix/udp.c
+        src/unix/uv-eio.c
+    )
+endif(UNIX)
+
+if(APPLE)
+    set(uv-src
+        ${uv-src}
+        src/unix/darwin.c
+        src/unix/fsevents.c
+        src/unix/kqueue.c
+    )
+endif(APPLE)
+
+if(${CMAKE_SYSTEM} MATCHES "Linux")
+    set(uv-src
+        ${uv-src}
+        src/unix/linux/inotify.c
+        src/unix/linux/linux-core.c
+        src/unix/linux/syscalls.c
+    )
+endif(${CMAKE_SYSTEM} MATCHES "Linux")
+
+## uv-deps
+if(UNIX)
+    set(uv-deps
+        m
+    )
+endif(UNIX)
+
+if(${CMAKE_SYSTEM} MATCHES "Linux")
+    set(uv-deps
+        ${uv-deps}
+        dl
+        rt
+    )
+endif(${CMAKE_SYSTEM} MATCHES "Linux")
+
+## uv-cflags
+if(UNIX)
+    set(uv-cflags
+        --std=gnu89
+        -pedantic
+        -Wall
+        -Wextra
+        -Wno-unused-parameter
+        -D_FILE_OFFSET_BITS=64
+        -D_GNU_SOURCE
+        -D_LARGEFILE_SOURCE
+        -DEIO_STACKSIZE=262144
+    )
+endif(UNIX)
+
+if(APPLE)
+    set(uv-cflags
+        ${uv-cflags}
+        -D_DARWIN_USE_64_BIT_INODE=1
+        -DEV_CONFIG_H='"config_darwin.h"'
+        -DEIO_CONFIG_H='"config_darwin.h"'
+    )
+endif(APPLE)
+
+if(${CMAKE_SYSTEM} MATCHES "Linux")
+    set(uv-cflags
+        ${uv-cflags}
+        -DEV_CONFIG_H='"config_linux.h"'
+        -DEIO_CONFIG_H='"config_linux.h"'
+    )
+endif(${CMAKE_SYSTEM} MATCHES "Linux")
+
+string(REPLACE ";" " " uv-cflags "${uv-cflags}")
+
+# build ------------------------------------------------------------------------
+
+include_directories(
+    ${uv-include}
+)
+
+add_library(uv STATIC
+    ${uv-src}
+)
+
+target_link_libraries(uv
+    ${uv-deps}
+)
+
+set_target_properties(uv PROPERTIES
+    COMPILE_FLAGS "${uv-cflags}"
+)

@@ -44,6 +44,35 @@ if(UNIX)
         src/unix/udp.c
         src/unix/uv-eio.c
     )
+else(UNIX)
+    set(uv-src
+        ${uv-src}
+        src/win/async.c
+        src/win/core.c
+        src/win/dl.c
+        src/win/error.c
+        src/win/fs.c
+        src/win/fs-event.c
+        src/win/getaddrinfo.c
+        src/win/handle.c
+        src/win/loop-watcher.c
+        src/win/pipe.c
+        src/win/thread.c
+        src/win/poll.c
+        src/win/process.c
+        src/win/process-stdio.c
+        src/win/req.c
+        src/win/signal.c
+        src/win/stream.c
+        src/win/tcp.c
+        src/win/tty.c
+        src/win/threadpool.c
+        src/win/timer.c
+        src/win/udp.c
+        src/win/util.c
+        src/win/winapi.c
+        src/win/winsock.c
+    )
 endif(UNIX)
 
 if(APPLE)
@@ -91,6 +120,12 @@ if(UNIX)
         -D_GNU_SOURCE
         -D_LARGEFILE_SOURCE
         -DEIO_STACKSIZE=262144
+    )
+else(UNIX)
+    set(uv-cflags
+        /D_GNU_SOURCE
+        /D_WIN32_WINNT=0x0600
+        /DEIO_STACKSIZE=262144
     )
 endif(UNIX)
 

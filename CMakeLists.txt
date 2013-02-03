@@ -98,6 +98,12 @@ if(UNIX)
     set(uv-deps
         m
     )
+else(UNIX)
+    set(uv-deps
+        iphlpapi
+        psapi
+        ws2_32
+    )
 endif(UNIX)
 
 if(${CMAKE_SYSTEM} MATCHES "Linux")
